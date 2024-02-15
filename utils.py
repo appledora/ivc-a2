@@ -37,5 +37,5 @@ def preprocess(frame: np.ndarray) -> np.ndarray:
     # explain the cv2.morphologyEx function
     # This function is used to perform morphological operations on the input image. That is, it is used to remove noise, smooth the image, and separate the objects in the image by performing operations like dilation, erosion, opening, closing, etc.
 
-    frame = cv2.morphologyEx(frame, cv2.MORPH_CLOSE, kernel=cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15)))
+    frame = cv2.morphologyEx(frame, cv2.MORPH_CLOSE, kernel=cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
     return frame

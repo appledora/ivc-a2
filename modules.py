@@ -152,15 +152,19 @@ def get_shape_features(shape_frame, contour, x, y):
     Ref: https://www.cse.usf.edu/~r1k/MachineVisionBook/MachineVision.files/MachineVision_Chapter2.pdf
     """
     moment = cv2.moments(contour)
+    # Get area of the object
+    size = moment["m00"]
+    if size == 0.0:
+        return shape_frame, (0, 0), (0, 0), 0, 0, 0
     centroid, theta, circularity = get_orientation_features(moment)
-
+    if len(contour) < 5:
+        return shape_frame, (0, 0), (0, 0), 0, 0, 0
     # Fit an ellipse to the contour
     shape = cv2.fitEllipse(contour) #TODO: Could also use polygon
 
     position = shape[0]
 
-    # Get area of the object
-    size = moment["m00"]
+    
 
     length = 100 #TODO: Adjust length
     # Minor Axis
@@ -271,15 +275,15 @@ def generate_template_from_mask(image_file, target_size=(200, 200)):
     return average_mask
 
 
-def get_templates(template_directory="../../data/archive/Template/"):
+def get_templates(template_directory="../../data/archive/Template/", ext="jpg"):
     """
     Function to generate a pyramid of templates
     """
     generated_templates = {}
     # generate different template for each subdirectory
-    for i in ["0", "5", "8", "2"]:
-        digit = glob.glob(os.path.join(template_directory, f"{i}/*.jpg"))
-        temp = generate_template_from_mask([digit[0]]) # TODO 
+    for i in ["1", "5", "6", "9"]:
+        digit = glob.glob(os.path.join(template_directory, f"{i}/*.{ext}"))
+        temp = generate_template_from_mask([digit[1]]) # TODO 
         generated_templates[i] = temp
 
     # plot the generated templates
@@ -292,10 +296,16 @@ def get_templates(template_directory="../../data/archive/Template/"):
     return generated_templates
 
 
-def custom_template_matching(skin_mask,template_pyramids,  threshold=0.6):
+def custom_template_matching(skin_mask, template_pyramids, subset=[1, 2], threshold=0.6):
     """
     Custom template matching function that uses the circularity of the digit to determine the best match
     """
+    if subset==1:
+        sub = ["1", "5"]
+    elif subset==2:
+        sub = ["6", "9"]
+    else:
+        sub = ["1", "5", "6", "9"]
     target_pyramids = get_pyramid(skin_mask)
     best_gesture = None
     best_match = 0
@@ -306,7 +316,7 @@ def custom_template_matching(skin_mask,template_pyramids,  threshold=0.6):
         img = pyramid.copy()
         # print(f"Image level: {i+1}")
         # print(f"Template idx: {template_idx}")
-        for keys in ["0", "5", "8", "2"]:
+        for keys in sub:
             curr_template = template_pyramids[keys][template_idx]
             curr_template = cv2.cvtColor(curr_template, cv2.COLOR_BGR2GRAY)
             match = cv2.matchTemplate(img, curr_template, cv2.TM_CCOEFF_NORMED)
