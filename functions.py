@@ -15,10 +15,12 @@ def find_frame_difference(current: np.ndarray, previous: np.ndarray) -> np.ndarr
     Returns:
         np.ndarray: D(x,y,t)
     """
-    current = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY)
-    previous = cv2.cvtColor(previous, cv2.COLOR_BGR2GRAY)
+    
     frame_diff = cv2.absdiff(current, previous)
-    return frame_diff
+    gs = cv2.cvtColor(frame_diff, cv2.COLOR_BGR2GRAY)
+    frame_diff_mask = (gs > 50).astype(np.uint8) * 255
+    masked_frame_diff = cv2.bitwise_and(frame_diff, frame_diff, mask=frame_diff_mask)
+    return frame_diff_mask
 
 def my_motion_energy(mh):
     """
@@ -89,14 +91,16 @@ def find_skin_color_blobs(frame):
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
     # Define the range of skin color in HSV
-    lower_skin = np.array([0, 80, 100], dtype=np.uint8)
-    upper_skin = np.array([20, 255, 255], dtype=np.uint8)
+    lower_skin = np.array([0, 80, 90], dtype=np.uint8)
+    upper_skin = np.array([20, 230, 240], dtype=np.uint8)
 
     # Threshold the HSV image to get the mask
     mask = cv2.inRange(hsv, lower_skin, upper_skin)
 
     # Find contours in the mask
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return frame, mask, None, None, None
     largest_contour = max(contours, key=cv2.contourArea)
     
     # Draw bounding boxes around the contours
@@ -214,6 +218,10 @@ def generate_template(image_files):
         _, _, largest_contour, _, _ = find_skin_color_blobs(image)
         x, y, w, h = cv2.boundingRect(largest_contour)
         largest_contour_roi = image[y:y+h, x:x+w]
+        # fill the entire region inside the contour
+        filled_roi = np.zeros_like(largest_contour_roi)
+        cv2.drawContours(filled_roi, [largest_contour], 0, (255, 255, 255), -1)
+        largest_contour_roi = cv2.bitwise_and(largest_contour_roi, filled_roi)
         largest_contour_roi = preprocess(largest_contour_roi)
         image_contours.append(largest_contour_roi)
 
@@ -221,24 +229,45 @@ def generate_template(image_files):
     largest_contour_rois = [cv2.resize(contour, target_size) for contour in image_contours]
     # binary thresholding
     largest_contour_rois = [cv2.cvtColor(contour, cv2.COLOR_BGR2GRAY) for contour in largest_contour_rois]
+    filled_roi = np.zeros_like(largest_contour_rois[0])
+
+    # accumulate the filled rois
+    for roi in largest_contour_rois:
+        filled_roi += roi
+
+    # normalize the accumulated roi
+    filled_roi = (filled_roi / len(largest_contour_rois)).astype(np.uint8)
+
     largest_contour_rois = [cv2.adaptiveThreshold(contour, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 17, 2) for contour in largest_contour_rois]
     largest_contour_rois = [cv2.cvtColor(contour, cv2.COLOR_GRAY2BGR) for contour in largest_contour_rois]
     average_contour = np.mean(largest_contour_rois, axis=0).astype(np.uint8)
     return average_contour
 
-def generate_template_from_mask(image_file, target_size=(200, 200)): 
+def generate_template_from_mask(image_file, target_size=(200, 200)):
     masks = []
     for im in image_file:
         image = cv2.imread(im)
         _, mask, _, _, _ = find_skin_color_blobs(image)
-        mask = preprocess(mask)
-        mask = cv2.resize(mask, target_size)
-        masks.append(mask)
+        mask_resized = cv2.resize(mask, target_size)
+        mask_resized = preprocess(mask_resized) # TODO: order of preprocessing impacts the masking output
+        masks.append(mask_resized)
 
-    masks = [cv2.adaptiveThreshold(mask, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 17, 2) for mask in masks]
-    masks = [cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR) for mask in masks]
+    # Create a blank image to accumulate filled mask
+    filled_mask = np.zeros(target_size, dtype=np.uint8)
 
-    average_mask = np.mean(masks, axis=0).astype(np.uint8)
+    # Accumulate masks
+    for mask in masks:
+        filled_mask += mask
+
+    # Normalize accumulated mask
+    filled_mask = (filled_mask / len(masks)).astype(np.uint8)
+
+    # Threshold the filled mask
+    thresholded_mask = cv2.threshold(filled_mask, 127, 255, cv2.THRESH_BINARY)[1]
+
+    # Convert to BGR for consistency
+    average_mask = cv2.cvtColor(thresholded_mask, cv2.COLOR_GRAY2BGR)
+
     return average_mask
 
 
@@ -250,7 +279,6 @@ def get_templates(template_directory="../../data/archive/Template/"):
     # generate different template for each subdirectory
     for i in ["0", "5", "8", "2"]:
         digit = glob.glob(os.path.join(template_directory, f"{i}/*.jpg"))
-        # temp = generate_template([digit[0]]) # TODO : Generate better templates, contour level may not be the best
         temp = generate_template_from_mask([digit[0]]) # TODO 
         generated_templates[i] = temp
 
@@ -291,4 +319,4 @@ def custom_template_matching(skin_mask,template_pyramids,  threshold=0.6):
     best_gesture = max(gesture_average, key=gesture_average.get)
     if gesture_average[best_gesture] <= threshold:
         best_gesture = ""
-    return best_gesture
+    return gesture_average, best_gesture
